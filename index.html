@@ -9,149 +9,162 @@
 
 <style>
 body {margin:0;font-family:Arial,sans-serif;background:#0b0e11;color:#eaecef;}
-header{padding:10px;background:#161a1e;display:flex;justify-content:space-between;align-items:center;gap:10px;}
-select, button{background:#0b0e11;color:#eaecef;border:1px solid #2b3139;padding:5px;border-radius:5px;cursor:pointer;}
-#chart{height:50vh;}
-#aiBox{position:fixed;bottom:15px;right:15px;width:360px;background:#161a1e;border-radius:12px;padding:12px;box-shadow:0 0 15px rgba(0,0,0,0.6);font-size:13px;overflow-y:auto;max-height:45vh;}
-#aiTitle{font-weight:bold;margin-bottom:6px;color:#0ecb81;}
-.signalScore{font-weight:700;margin-bottom:6px;}
-.chatHistory{margin-top:10px;border-top:1px solid #2b3139;padding-top:6px;max-height:150px;overflow-y:auto;font-size:12px;}
-.favoriteBtn{margin-left:5px;padding:3px 6px;font-size:11px;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+header {padding:10px;background:#161a1e;display:flex;justify-content:space-between;align-items:center;}
+select, button {background:#0b0e11;color:#eaecef;border:1px solid #2b3139;padding:5px;border-radius:5px;}
+#chart {height:60vh;}
+#aiBox {position:fixed;bottom:15px;right:15px;width:360px;background:#161a1e;border-radius:12px;padding:12px;box-shadow:0 0 15px rgba(0,0,0,0.6);font-size:13px;animation:fadeIn 0.3s ease-in;max-height:400px;overflow-y:auto;}
+#aiTitle {font-weight:bold;margin-bottom:6px;color:#0ecb81;}
+#aiText {white-space:pre-line;line-height:1.4;}
+#favorites {margin-left:10px;}
+.favorite-btn {padding:4px 8px;margin-left:5px;border-radius:5px;border:1px solid #2b3139;cursor:pointer;}
+.favorite-btn.active {background:#0ecb81;color:#000;}
+#history {margin-top:10px;border-top:1px solid #2b3139;padding-top:6px;font-size:12px;max-height:120px;overflow-y:auto;}
+.alert-box {position:fixed;top:80px;right:15px;padding:12px;background:#0ecb81;color:#000;border-radius:8px;display:none;z-index:100;}
 </style>
 </head>
 
 <body>
-
 <header>
-  <div>📊 Crypto Candle AI Pro</div>
-  <select id="symbol">
-    <option value="BTCUSDT">BTC / USDT</option>
-    <option value="ETHUSDT">ETH / USDT</option>
-    <option value="BNBUSDT">BNB / USDT</option>
-  </select>
-  <select id="timeframe">
-    <option value="1m">1 m</option>
-    <option value="5m">5 m</option>
-    <option value="15m">15 m</option>
-  </select>
-  <button id="favoritesBtn">⭐ Favorites</button>
+    <div>📊 Crypto Candle AI Pro</div>
+    <div>
+        <select id="symbol">
+            <option value="BTCUSDT">BTC / USDT</option>
+            <option value="ETHUSDT">ETH / USDT</option>
+            <option value="BNBUSDT">BNB / USDT</option>
+        </select>
+        <button id="favBtn" class="favorite-btn">⭐</button>
+        <select id="timeframe">
+            <option value="1m">1m</option>
+            <option value="5m">5m</option>
+            <option value="15m">15m</option>
+            <option value="1h" selected>1h</option>
+            <option value="4h">4h</option>
+            <option value="1d">1d</option>
+        </select>
+        <button id="exportBtn">💾 Export</button>
+    </div>
 </header>
 
 <div id="chart"></div>
 
 <div id="aiBox">
-  <div id="aiTitle">🤖 KI-Analyse</div>
-  <div class="signalScore" id="signalScore">KI-Score: --</div>
-  <div id="aiText">Warte auf erste Kerze…</div>
-  <div class="chatHistory" id="chatHistory"></div>
+    <div id="aiTitle">🤖 KI-Analyse</div>
+    <div id="aiText">Warte auf erste Kerze…</div>
+    <div id="history"></div>
 </div>
 
+<div class="alert-box" id="alertBox"></div>
+
 <script>
-// ==================== Setup Chart ====================
+// ================== Grund Setup ==================
 const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-    layout: {background:{color:'#0b0e11'},textColor:'#eaecef'},
-    grid: {vertLines:{color:'#161a1e'},horzLines:{color:'#161a1e'}},
-    timeScale:{borderColor:'#2b3139'},rightPriceScale:{borderColor:'#2b3139'}
+    layout: { background:{color:'#0b0e11'}, textColor:'#eaecef' },
+    grid: { vertLines:{color:'#161a1e'}, horzLines:{color:'#161a1e'} },
+    timeScale:{borderColor:'#2b3139'}, rightPriceScale:{borderColor:'#2b3139'}
 });
-const candleSeries = chart.addCandlestickSeries({upColor:'#0ecb81',downColor:'#f6465d',borderUpColor:'#0ecb81',borderDownColor:'#f6465d',wickUpColor:'#0ecb81',wickDownColor:'#f6465d'});
-
-let candles=[], lastTime=0, favorites=[], showFavorites=false;
-
-// ==================== Load Candle Data ====================
-async function loadData(symbol, tf){
-  const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=100`);
-  const data = await res.json();
-  candles = data.map(c=>({time:c[0]/1000,open:+c[1],high:+c[2],low:+c[3],close:+c[4]}));
-  candleSeries.setData(candles);
-  lastTime = candles[candles.length-1].time;
-}
-
-// ==================== Candle Analyse ====================
-function analyzeCandle(c,p){
-  const body = Math.abs(c.close-c.open), range=c.high-c.low;
-  const upShadow=c.high-Math.max(c.open,c.close), lowShadow=Math.min(c.open,c.close)-c.low;
-  const isBull = c.close>c.open;
-  let text="", score=50;
-
-  // Einzelmuster
-  if(body<=range*0.1){ text+='🟡 Doji:\nMarkt unentschlossen.\n\n'; score+=0; }
-  if(lowShadow>body*2 && isBull){ text+='🟢 Hammer:\nBodenbildung möglich. Kaufsignal.\n\n'; score+=15; }
-  if(upShadow>body*2 && !isBull){ text+='🔴 Shooting Star:\nTop möglich, Verkaufsdruck.\n\n'; score-=15; }
-
-  // Engulfing
-  if(p){
-    const prevBull = p.close>p.open;
-    const prevBear = p.close<p.open;
-    if(prevBear && isBull && c.close>p.open && c.open<p.close){ text+='🚀 Bullish Engulfing:\nTrendwende nach oben.\nHandlung: Kauf erwägen.\n\n'; score+=20; }
-    if(prevBull && !isBull && c.open>p.close && c.close<p.open){ text+='⚠️ Bearish Engulfing:\nTrendwende nach unten.\nHandlung: Verkauf erwägen.\n\n'; score-=20; }
-  }
-
-  // Erweiterte Muster
-  if(c.close>c.open && body>range*0.6 && p && p.close>p.open && candles[candles.indexOf(c)-2] && candles[candles.indexOf(c)-2].close>candles[candles.indexOf(c)-2].open){
-    text+='🌅 Three White Soldiers:\nStarker Aufwärtstrend.\nHandlung: Kauf stark.\n\n'; score+=25; }
-  if(!isBull && body>range*0.6 && p && p.close<p.open && candles[candles.indexOf(c)-2] && candles[candles.indexOf(c)-2].close<p.open){
-    text+='🌄 Three Black Crows:\nStarker Abwärtstrend.\nHandlung: Verkauf stark.\n\n'; score-=25; }
-
-  if(!text) text='ℹ️ Normale Kerze: Kein spezielles Muster erkannt.';
-
-  score = Math.min(Math.max(score,0),100);
-  return {text,score};
-}
-
-// ==================== Update Loop ====================
-async function updateLoop(){
-  const symbol = document.getElementById('symbol').value;
-  const tf = document.getElementById('timeframe').value;
-  const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=2`);
-  const data = await res.json();
-  const last = {time:data[1][0]/1000,open:+data[1][1],high:+data[1][2],low:+data[1][3],close:+data[1][4]};
-
-  if(last.time!==lastTime){
-    candles.push(last);
-    candleSeries.update(last);
-
-    const prev = candles[candles.length-2];
-    const analysis = analyzeCandle(last, prev);
-
-    document.getElementById('aiText').textContent=analysis.text;
-    document.getElementById('signalScore').textContent=`KI-Score: ${analysis.score}%`;
-
-    // Chat-History
-    const chat = document.getElementById('chatHistory');
-    const msg = document.createElement('div');
-    msg.textContent = `[${new Date().toLocaleTimeString()}] ${analysis.text}`;
-    chat.prepend(msg);
-
-    // Alert bei starker Signale
-    if(analysis.score>=80 || analysis.score<=20) alert(`⚡ Starke Signal! KI-Score: ${analysis.score}%`);
-
-    lastTime = last.time;
-  }
-}
-
-// ==================== Favorites ====================
-document.getElementById('favoritesBtn').addEventListener('click',()=>{
-  showFavorites=!showFavorites;
-  if(showFavorites){
-    const symbolSelect=document.getElementById('symbol');
-    symbolSelect.innerHTML='';
-    favorites.forEach(f=>{
-      const o=document.createElement('option'); o.value=f; o.textContent=f.replace('USDT',' / USDT'); symbolSelect.appendChild(o);
-    });
-  } else {
-    location.reload();
-  }
+const candleSeries = chart.addCandlestickSeries({
+    upColor:'#0ecb81', downColor:'#f6465d', borderUpColor:'#0ecb81', borderDownColor:'#f6465d',
+    wickUpColor:'#0ecb81', wickDownColor:'#f6465d'
 });
 
-// ==================== Events ====================
-document.getElementById('symbol').addEventListener('change',()=>loadData(document.getElementById('symbol').value));
-document.getElementById('timeframe').addEventListener('change',()=>loadData(document.getElementById('symbol').value));
+let candles=[], lastTime=0, history=[], favorites=[];
 
-// ==================== Start ====================
-loadData('BTCUSDT','1m');
+// ================== Daten Laden ==================
+async function loadData(symbol, tf) {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=100`);
+    const data = await res.json();
+    candles = data.map(c=>({
+        time:c[0]/1000, open:+c[1], high:+c[2], low:+c[3], close:+c[4]
+    }));
+    candleSeries.setData(candles);
+    lastTime = candles[candles.length-1].time;
+}
+
+// ================== Candle Analyse ==================
+function analyzeCandle(c, p, trend='neutral') {
+    const body = Math.abs(c.close-c.open);
+    const range = c.high-c.low;
+    const upShadow=c.high-Math.max(c.open,c.close);
+    const lowShadow=Math.min(c.open,c.close)-c.low;
+    const isBull=c.close>c.open;
+    let score=50,text='',advice='';
+    // Muster erkennen
+    if(body<=range*0.1){text+='🟡 Doji: Markt unentschlossen.\n';advice='Abwarten';score+=0;}
+    if(lowShadow>body*2&&isBull){text+='🟢 Hammer: Mögliche Bodenbildung.\n';advice='Kaufen';score+=20;}
+    if(upShadow>body*2&&!isBull){text+='🔴 Shooting Star: Möglicher Top.\n';advice='Verkaufen';score-=20;}
+    if(p){
+        if(p.close<p.open && isBull && c.close>p.open && c.open<p.close){text+='🚀 Bullish Engulfing: Umschwung nach oben.\n';advice='Kaufen';score+=25;}
+        if(p.close>p.open && !isBull && c.open>p.close && c.close<p.open){text+='⚠️ Bearish Engulfing: Umschwung nach unten.\n';advice='Verkaufen';score-=25;}
+    }
+    // Trend Kontext
+    text+='📈 Trend: '+trend+'\n';
+    // Score und Handlungsempfehlung
+    text+='💹 KI-Score: '+Math.min(100,Math.max(0,score))+'%\n';
+    text+='📝 Empfehlung: '+advice+'\n';
+    return {text,score};
+}
+
+// ================== Update Loop ==================
+async function updateLoop() {
+    const symbol = document.getElementById('symbol').value;
+    const tf = document.getElementById('timeframe').value;
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=2`);
+    const data = await res.json();
+    const last={time:data[1][0]/1000,open:+data[1][1],high:+data[1][2],low:+data[1][3],close:+data[1][4]};
+    if(last.time!==lastTime){
+        candles.push(last);
+        candleSeries.update(last);
+        const prev=candles[candles.length-2];
+        // Trend bestimmen
+        let trend='neutral';
+        if(last.close>prev.close) trend='Aufwärtstrend';
+        else if(last.close<prev.close) trend='Abwärtstrend';
+        const analysis=analyzeCandle(last,prev,trend);
+        document.getElementById('aiText').textContent=analysis.text;
+        history.unshift(analysis.text);
+        if(history.length>10) history.pop();
+        document.getElementById('history').innerHTML=history.join('<hr>');
+        lastTime=last.time;
+        // Alert
+        if(analysis.score>=80 || analysis.score<=20) showAlert(analysis.text);
+    }
+}
+
+function showAlert(text){
+    const box=document.getElementById('alertBox');
+    box.textContent=text;
+    box.style.display='block';
+    setTimeout(()=>box.style.display='none',5000);
+}
+
+// ================== Favoriten ==================
+document.getElementById('favBtn').addEventListener('click',()=>{
+    const symbol=document.getElementById('symbol').value;
+    if(favorites.includes(symbol)){
+        favorites=favorites.filter(s=>s!==symbol);
+        document.getElementById('favBtn').classList.remove('active');
+    } else {
+        favorites.push(symbol);
+        document.getElementById('favBtn').classList.add('active');
+    }
+});
+
+// ================== Export ==================
+document.getElementById('exportBtn').addEventListener('click',()=>{
+    const blob=new Blob([history.join('\n\n')],{type:'text/plain'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='KI_Historie.txt';
+    a.click();
+});
+
+// ================== Events ==================
+document.getElementById('symbol').addEventListener('change',()=>{loadData(document.getElementById('symbol').value,document.getElementById('timeframe').value)});
+document.getElementById('timeframe').addEventListener('change',()=>{loadData(document.getElementById('symbol').value,document.getElementById('timeframe').value)});
+
+// ================== Start ==================
+loadData('BTCUSDT','1h');
 setInterval(updateLoop,5000);
 </script>
-
 </body>
 </html>
